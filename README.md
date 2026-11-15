@@ -12,31 +12,32 @@ The goal of this repository is to cover the main **learning paradigms** (supervi
 |---|---|---|---|---|---|---|
 | 1 | [Instacart Market Basket](./01_instacart_market_basket/) | 🛒 Retail / grocery | **Supervised** + **Unsupervised** | Implicit (purchases) | [Instacart Market Basket Analysis (Kaggle)](https://www.kaggle.com/c/instacart-market-basket-analysis) | ✅ Done |
 | 2 | [MovieLens 1M](./02_movielens/) | 🎬 Media & entertainment (streaming) | **Supervised** + **Unsupervised** | Explicit (1–5 star ratings) | [MovieLens 1M (GroupLens)](https://grouplens.org/datasets/movielens/1m/) | ✅ Done |
-| 3 | Amazon Reviews 2023 | 📦 E-commerce | **Self-supervised** + **Unsupervised** | Sequential (interactions over time) | [Amazon Reviews 2023 (Hugging Face)](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) | 🔜 Next |
-| 4 | Criteo Display Advertising | 📢 Advertising | **Supervised** | Implicit (clicks) | [Criteo Display Advertising Challenge (Kaggle)](https://www.kaggle.com/c/criteo-display-ad-challenge) | ⏳ Optional |
+| 3 | [Amazon Reviews 2023 — Video Games](./03_amazon_reviews_sequential/) | 📦 E-commerce | **Self-supervised** + **Unsupervised** | Sequential (interactions over time) | [Amazon Reviews 2023 (Hugging Face)](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) | ✅ Done |
+| 4 | Criteo Display Advertising | 📢 Advertising | **Supervised** | Implicit (clicks) | [Criteo Display Advertising Challenge (Kaggle)](https://www.kaggle.com/c/criteo-display-ad-challenge) | 🔜 Next (optional) |
 
 ---
 
 ## 🎯 What This Repository Demonstrates
 
 **Learning paradigms**
-- **Unsupervised learning:** association rules, item-item collaborative filtering, matrix factorization (SVD, ALS, PureSVD), user clustering into taste segments.
+- **Unsupervised learning:** association rules, item-item collaborative filtering, matrix factorization (SVD, ALS, PureSVD), user clustering into taste segments, Markov transitions and sequential item-kNN.
 - **Supervised learning:** gradient boosting reorder models, rating prediction with stacking, learning-to-rank (LambdaRank).
-- **Self-supervised learning** *(planned)*: sequential next-item recommendation with deep learning.
+- **Self-supervised learning:** sequential next-item prediction with deep learning (GRU4Rec, SASRec Transformer) in PyTorch on GPU.
 
 **Business domains**
-- **Retail** (grocery delivery) and **media & entertainment** (movie streaming), with upcoming **e-commerce** and **advertising** use cases.
+- **Retail** (grocery delivery), **media & entertainment** (movie streaming) and **e-commerce** (video games marketplace), with an optional **advertising** use case.
 
 **Types of feedback**
-- **Implicit** (purchases) and **explicit** (star ratings), with **sequential** interactions planned.
+- **Implicit** (purchases), **explicit** (star ratings) and **sequential** (ordered interactions over time).
 
 **Recommender system skills**
 - Translating a business problem into a recommendation task and offline metrics.
 - EDA focused on decisions for the recommender (repetition, popularity bias, rating biases, timing, basket size, taste structure).
 - Two-stage recommenders: **unsupervised candidate generation + supervised ranking**.
+- **Hybrid recommenders:** score fusion of unsupervised and deep self-supervised models, and context-aware routing (gap-aware switch).
 - **Stacking / blending** of unsupervised models inside a supervised model, with leakage-free validation.
-- Evaluation with **rating metrics** (RMSE, MAE, star-level confusion matrix) and **ranking metrics** (Precision@K, Recall@K, F1, NDCG, Hit Rate), **theoretical ceilings**, catalog coverage, novelty and **segment / fairness analysis**.
-- Leakage-free temporal validation, ablation studies and model calibration.
+- Evaluation with **rating metrics** (RMSE, MAE, star-level confusion matrix) and **ranking metrics** (Precision@K, Recall@K, F1, NDCG, Hit Rate), **full-catalog ranking**, **theoretical ceilings**, catalog coverage, long-tail share and **segment / fairness analysis**.
+- Leakage-free temporal validation, leave-one-out benchmarks (and their leakage caveats), fair refitting, ablation studies and model calibration.
 - Turning results into **business recommendations**, customer segments and A/B testing proposals.
 
 ---
@@ -120,15 +121,45 @@ The goal of this repository is to cover the main **learning paradigms** (supervi
 
 ---
 
-## 3️⃣ Amazon Reviews 2023 — Sequential Next-Item Recommendation *(next)*
+## 3️⃣ Amazon Reviews 2023 (Video Games) — Sequential Next-Item Recommendation
 
 > **Demonstrates:** ✅ Self-supervised learning · ✅ Unsupervised learning · 📦 E-commerce
 
-Predict the next product a user will interact with, based on the **order of their past interactions**. Planned: item-similarity baseline (unsupervised) and sequential deep learning models such as GRU4Rec / SASRec (self-supervised). This complements MovieLens, where ratings were mostly made in bulk sessions and their order carried little information.
+**Business problem:** given the **ordered sequence** of products a customer has bought and reviewed, which product will they buy next? This powers surfaces such as *"Customers who bought this also bought"*, *"Recommended for you"* on the home page and post-purchase emails.
+
+**Data:** official 5-core benchmark of the *Video Games* category: **814,586 interactions** from **94,762 users** on **25,612 products** (1999–2023, density 0.034%). Evaluated with the official **leave-one-out** split (last item = test, second-to-last = validation) and **full-catalog ranking** over all 25,612 products (no negative sampling).
+
+**Approach**
+| Stage | Models | Paradigm |
+|---|---|---|
+| Baselines | All-time popularity, **recent popularity** (last *W* months, leakage-free) | Heuristic |
+| Item-to-item | Markov transitions, **sequential item-kNN** (symmetric co-occurrence window, popularity-aware similarity, recency decay over the last items) | **Unsupervised** |
+| Deep sequential | **GRU4Rec** (recurrent) and **SASRec** (Transformer with causal self-attention), full-softmax next-item objective, PyTorch on GPU | **Self-supervised** |
+| Hybrid | Z-score fusion of item-kNN + SASRec | Unsupervised + self-supervised |
+| Routing | **Gap-aware switch:** hybrid for active customers, trending products for customers inactive > 180 days | Hybrid + business rule |
+
+**Key results** (test set, 94,762 users)
+| Model | HR@10 | NDCG@10 | Coverage@10 | Improvement (NDCG@10) |
+|---|---|---|---|---|
+| Popularity (all-time) | 2.5% | 0.0127 | 0.1% | — |
+| Recent popularity (last month) | 6.0% | 0.0318 | 5.7% | 2.5× all-time popularity |
+| Sequential item-kNN | 9.5% | 0.0570 | 91.5% | +79% vs. recent popularity |
+| SASRec (refit on train + valid) | 10.6% | 0.0592 | 55.1% | +4% vs. item-kNN |
+| Hybrid item-kNN + SASRec | 11.3% | 0.0651 | 69.8% | +10% vs. SASRec |
+| **Gap-aware switch (final)** | **12.3%** | **0.0711** | — | **5.6× popularity · +25% vs. item-kNN** |
+
+**Key insights**
+- **Recency drives demand:** popularity from the *last month* beats all-time popularity by 2.4×, even though the all-time version sees the future. Console generations reshape the market (PlayStation's share fell from \~33% to \~20% while Nintendo's rose to \~35% after the Switch launch).
+- **Order matters:** consecutive purchases share the same console 3.8× and the same publisher 4.5× more often than chance, but the long-term profile also matters, so the best models use the **whole history with strong recency weighting**.
+- **Unsupervised vs. self-supervised are complementary:** item-kNN wins inside shopping sessions, SASRec wins after longer gaps. Their fusion reaches 83% of the oracle that always picks the right model, and raises coverage from 55% to 70%.
+- **Time since the last purchase is the strongest driver:** NDCG@10 varies 10× between same-session targets (0.129) and customers returning after a year (0.013), where *no* personalized model beats trending products → a one-line routing rule adds +9%.
+- **Protocol details change conclusions:** a fair refit of the neural models on train + valid reversed their ranking against item-kNN, and leave-one-out leaks future data (19.4% of training interactions happen after the median user's test target), which is documented as a limitation.
+
+📓 Notebook: [`amazon_reviews_2023_video_games_recsys.ipynb`](./03_amazon_reviews_sequential/amazon_reviews_2023_video_games_recsys.ipynb)
 
 ---
 
-## 4️⃣ Criteo Display Advertising — Click-Through Rate Prediction *(optional)*
+## 4️⃣ Criteo Display Advertising — Click-Through Rate Prediction *(next, optional)*
 
 > **Demonstrates:** ✅ Supervised learning · 📢 Advertising
 
@@ -147,24 +178,27 @@ Recommendation_Systems/
 ├── 02_movielens/
 │   ├── README.md
 │   └── movielens_1m_recsys.ipynb
-├── 03_amazon_reviews_sequential/ # next
-└── 04_criteo_ctr/                # optional
+├── 03_amazon_reviews_sequential/
+│   ├── README.md
+│   └── amazon_reviews_2023_video_games_recsys.ipynb
+└── 04_criteo_ctr/                # next (optional)
 ```
 
 ---
 
 ## ⚙️ Tech Stack
 
-Python · pandas · NumPy · SciPy · scikit-learn · LightGBM · Matplotlib · seaborn · Google Colab
+Python · pandas · NumPy · SciPy · scikit-learn · LightGBM · PyTorch · Hugging Face Hub · Matplotlib · seaborn · Google Colab
 
 ---
 
 ## ▶️ How to Run
 
-1. Open the notebook in **Google Colab** (or a local Jupyter environment with ≥12 GB RAM).
+1. Open the notebook in **Google Colab** (or a local Jupyter environment with ≥12 GB RAM). The Amazon notebook trains neural models and should run on a **GPU runtime** (a Colab T4 is enough).
 2. Download the data into a `data/` folder:
    - **Instacart:** with the Kaggle API (instructions inside the notebook).
    - **MovieLens 1M:** downloaded automatically from GroupLens by the notebook (no account needed).
+   - **Amazon Reviews 2023:** downloaded automatically from the Hugging Face Hub by the notebook (no account needed).
 3. Run all cells from top to bottom. Each notebook reports its **total execution time** at the end.
 
 > Datasets are **not included** in this repository; they must be downloaded from their original sources, subject to their respective licenses and terms of use.
