@@ -13,7 +13,7 @@ The goal of this repository is to cover the main **learning paradigms** (supervi
 | 1 | [Instacart Market Basket](./01_instacart_market_basket/) | 🛒 Retail / grocery | **Supervised** + **Unsupervised** | Implicit (purchases) | [Instacart Market Basket Analysis (Kaggle)](https://www.kaggle.com/c/instacart-market-basket-analysis) | ✅ Done |
 | 2 | [MovieLens 1M](./02_movielens/) | 🎬 Media & entertainment (streaming) | **Supervised** + **Unsupervised** | Explicit (1–5 star ratings) | [MovieLens 1M (GroupLens)](https://grouplens.org/datasets/movielens/1m/) | ✅ Done |
 | 3 | [Amazon Reviews 2023 — Video Games](./03_amazon_reviews_sequential/) | 📦 E-commerce | **Self-supervised** + **Unsupervised** | Sequential (interactions over time) | [Amazon Reviews 2023 (Hugging Face)](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) | ✅ Done |
-| 4 | Criteo Display Advertising | 📢 Advertising | **Supervised** | Implicit (clicks) | [Criteo Display Advertising Challenge (Kaggle)](https://www.kaggle.com/c/criteo-display-ad-challenge) | 🔜 Next (optional) |
+| 4 | [Criteo Display Advertising](./04_criteo_ctr/) | 📢 Advertising | **Supervised** | Implicit (clicks on ad impressions) | [Criteo Display Advertising Challenge (Kaggle)](https://www.kaggle.com/c/criteo-display-ad-challenge) | ✅ Done |
 
 ---
 
@@ -21,23 +21,24 @@ The goal of this repository is to cover the main **learning paradigms** (supervi
 
 **Learning paradigms**
 - **Unsupervised learning:** association rules, item-item collaborative filtering, matrix factorization (SVD, ALS, PureSVD), user clustering into taste segments, Markov transitions and sequential item-kNN.
-- **Supervised learning:** gradient boosting reorder models, rating prediction with stacking, learning-to-rank (LambdaRank).
+- **Supervised learning:** gradient boosting reorder models, rating prediction with stacking, learning-to-rank (LambdaRank), click-through rate prediction (logistic regression, XGBoost, Factorization Machines, DeepFM).
 - **Self-supervised learning:** sequential next-item prediction with deep learning (GRU4Rec, SASRec Transformer) in PyTorch on GPU.
 
 **Business domains**
-- **Retail** (grocery delivery), **media & entertainment** (movie streaming) and **e-commerce** (video games marketplace), with an optional **advertising** use case.
+- **Retail** (grocery delivery), **media & entertainment** (movie streaming), **e-commerce** (video games marketplace) and **online advertising** (display ads).
 
 **Types of feedback**
-- **Implicit** (purchases), **explicit** (star ratings) and **sequential** (ordered interactions over time).
+- **Implicit** (purchases and clicks), **explicit** (star ratings) and **sequential** (ordered interactions over time).
 
 **Recommender system skills**
 - Translating a business problem into a recommendation task and offline metrics.
 - EDA focused on decisions for the recommender (repetition, popularity bias, rating biases, timing, basket size, taste structure).
 - Two-stage recommenders: **unsupervised candidate generation + supervised ranking**.
+- **CTR prediction at scale:** high-cardinality categorical features (rare-value grouping, out-of-fold target encoding), feature-interaction models (FM, DeepFM) and tree / neural ensembles.
 - **Hybrid recommenders:** score fusion of unsupervised and deep self-supervised models, and context-aware routing (gap-aware switch).
 - **Stacking / blending** of unsupervised models inside a supervised model, with leakage-free validation.
 - Evaluation with **rating metrics** (RMSE, MAE, star-level confusion matrix) and **ranking metrics** (Precision@K, Recall@K, F1, NDCG, Hit Rate), **full-catalog ranking**, **theoretical ceilings**, catalog coverage, long-tail share and **segment / fairness analysis**.
-- Leakage-free temporal validation, leave-one-out benchmarks (and their leakage caveats), fair refitting, ablation studies and model calibration.
+- Leakage-free temporal validation, leave-one-out benchmarks (and their leakage caveats), fair refitting, ablation studies, **probability calibration** (reliability curves, ECE, Platt scaling) and gain / lift analysis.
 - Turning results into **business recommendations**, customer segments and A/B testing proposals.
 
 ---
@@ -159,11 +160,44 @@ The goal of this repository is to cover the main **learning paradigms** (supervi
 
 ---
 
-## 4️⃣ Criteo Display Advertising — Click-Through Rate Prediction *(next, optional)*
+## 4️⃣ Criteo Display Advertising — Click-Through Rate Prediction
 
-> **Demonstrates:** ✅ Supervised learning · 📢 Advertising
+> **Demonstrates:** ✅ Supervised learning · 📢 Online advertising
 
-Predict whether a user will click on an ad, using large-scale data with high-cardinality categorical features. Planned: logistic regression, factorization machines and DeepFM.
+**Business problem:** given an ad impression (user, ad, publisher and context), what is the probability that the user clicks? The click-through rate (CTR) drives every **ad auction**: which ad to show and how much to bid (expected revenue = pCTR × price per click). CTR models are also the **ranking stage** of industrial recommender systems. Because bids use the probability itself, the model must be both **discriminative** and **calibrated**.
+
+**Data:** Criteo Display Advertising Challenge: **45.8M impressions over 7 days**, with 13 integer and 26 hashed categorical features (meaning undisclosed). We use a **chronological 1-in-5 sample (9.17M impressions)**, streamed from the compressed archive, with a **temporal split**: days 1–5 for training, day 6 for validation and day 7 for test.
+
+**Approach**
+| Stage | Models | Key idea |
+|---|---|---|
+| Encoding | Rare values (< 10 in train) → `<OOV>`, missing as its own category, log-bucketed integers | 9.16M distinct values → 254k codes (36× compression) |
+| Baselines | Global CTR, **logistic regression** (one-hot over 254k codes) | Additive, classic industry model |
+| Trees | **XGBoost on GPU** with out-of-fold target encodings and count encodings | Interactions learned through splits |
+| Factorization | **Factorization Machine** | Every pair of features interacts through learned embeddings |
+| Deep learning | **DeepFM** (FM + neural network on shared embeddings), PyTorch on GPU | Pairwise + higher-order interactions |
+| Final model | **XGBoost + DeepFM ensemble** in logit space, **Platt recalibration** | Complementary models, calibrated probabilities |
+
+**Key results** (test = day 7, 1.31M impressions)
+| Model | Log loss | AUC | Log-loss reduction vs. global CTR | Calibration error (ECE) |
+|---|---|---|---|---|
+| Global CTR | 0.5725 | 0.500 | — | — |
+| Logistic regression | 0.4672 | 0.784 | 18.4% | 0.81% |
+| Factorization Machine | 0.4606 | 0.792 | 19.5% | — |
+| DeepFM | 0.4561 | 0.797 | 20.4% | 0.73% |
+| XGBoost (GPU) | 0.4539 | 0.799 | 20.7% | 0.17% |
+| **Ensemble + Platt recalibration** | **0.4518** | **0.802** | **21.1%** | **0.17%** |
+
+**Business value:** ranking impressions by the final model's pCTR, buying the **top 20%** captures **47.4% of all clicks** (lift 2.37×), and the top 5% has a click rate **3.1× the average**.
+
+**Key insights**
+- **No single feature is strong, so value comes from combining many weak signals:** the best feature alone reduces log loss by 6.9%, all features additively by 18.4%, and with interactions by 21.1%.
+- **High cardinality is the core challenge:** 9.2M distinct categorical values, 31.7% of test impressions carry a value never seen in training, and six ID-like features turned out to be **one hierarchy** at different granularities.
+- **Missingness is information:** missing values change the CTR by factors of 0.37–1.27, so they are encoded explicitly instead of imputed.
+- **CTR models overfit after one epoch,** and small embeddings (k = 8) win. **Gradient boosting** with good encodings was the best single model (trained in \~1 minute on a GPU), and the **ensemble with DeepFM** beat both.
+- **Calibration must be measured:** models with similar AUC differed 4× in calibration error. Logistic regression overpays for the most promising impressions; a two-parameter Platt step brings the final model within 0.2 pp of the observed CTR.
+
+📓 Notebook: [`criteo_display_ads_ctr.ipynb`](./04_criteo_ctr/criteo_display_ads_ctr.ipynb)
 
 ---
 
@@ -181,24 +215,27 @@ Recommendation_Systems/
 ├── 03_amazon_reviews_sequential/
 │   ├── README.md
 │   └── amazon_reviews_2023_video_games_recsys.ipynb
-└── 04_criteo_ctr/                # next (optional)
+└── 04_criteo_ctr/
+    ├── README.md
+    └── criteo_display_ads_ctr.ipynb
 ```
 
 ---
 
 ## ⚙️ Tech Stack
 
-Python · pandas · NumPy · SciPy · scikit-learn · LightGBM · PyTorch · Hugging Face Hub · Matplotlib · seaborn · Google Colab
+Python · pandas · NumPy · SciPy · scikit-learn · LightGBM · XGBoost · PyTorch · Hugging Face Hub · PyArrow (Parquet) · Matplotlib · seaborn · Google Colab
 
 ---
 
 ## ▶️ How to Run
 
-1. Open the notebook in **Google Colab** (or a local Jupyter environment with ≥12 GB RAM). The Amazon notebook trains neural models and should run on a **GPU runtime** (a Colab T4 is enough).
+1. Open the notebook in **Google Colab** (or a local Jupyter environment with ≥12 GB RAM). The Amazon and Criteo notebooks train neural models and should run on a **GPU runtime** (a Colab T4 or L4 is enough).
 2. Download the data into a `data/` folder:
    - **Instacart:** with the Kaggle API (instructions inside the notebook).
    - **MovieLens 1M:** downloaded automatically from GroupLens by the notebook (no account needed).
    - **Amazon Reviews 2023:** downloaded automatically from the Hugging Face Hub by the notebook (no account needed).
+   - **Criteo:** the official archive (\~4.3 GB) is downloaded automatically from a public mirror (no account needed), streamed and saved as a compact Parquet sample. A Kaggle Datasets mirror is provided as a fallback.
 3. Run all cells from top to bottom. Each notebook reports its **total execution time** at the end.
 
 > Datasets are **not included** in this repository; they must be downloaded from their original sources, subject to their respective licenses and terms of use.
